@@ -51,11 +51,6 @@ import org.apache.hadoop.util.ToolRunner;
  */
 public class AnalysisSummary extends Configured implements Tool {
 
-	public static int REQUEST_TIME_INDEX = 0;
-	public static int REQUEST_ELAPSE_TIME_INDEX = 1;
-	public static int REQUEST_LABEL_INDEX = 2;
-	public static int REQUEST_SUCCESSFUL_INDEX = 7;
-
 	private static String SEPARATOR = ",";
 
 	/**
@@ -65,17 +60,28 @@ public class AnalysisSummary extends Configured implements Tool {
 	public static class MapClass extends MapReduceBase implements
 			Mapper<LongWritable, Text, Text, Text> {
 
+	    private Configuration conf;
+	    
+	    @Override
+	    public void configure(JobConf job) {
+	    	conf = job;
+	    }
 		@Override
 		public void map(LongWritable key, Text value,
 				OutputCollector<Text, Text> output, Reporter reporter)
 				throws IOException {
-			String line = value.toString().trim();
-
-			if (line.length() > 5) {
-				String[] fields = line.split(SEPARATOR);
+			int REQUEST_TIME_INDEX = conf.getInt("REQUEST_TIME_INDEX", -1);//0
+			int REQUEST_ELAPSE_TIME_INDEX = conf.getInt("REQUEST_ELAPSE_TIME_INDEX", -1);//1
+			int REQUEST_LABEL_INDEX = conf.getInt("REQUEST_LABEL_INDEX", -1);//2
+			int REQUEST_SUCCESSFUL_INDEX = conf.getInt("REQUEST_SUCCESSFUL_INDEX", -1);//7
+			int REQUEST_BYTE_INDEX = conf.getInt("REQUEST_BYTE_INDEX", -1);
+			int NAME_LIST_LENGTH = conf.getInt("NAME_LIST_LENGTH", -1);
+			
+			String[] fields = value.toString().trim().split(SEPARATOR);
+			if (fields.length == NAME_LIST_LENGTH) {
 				String label = fields[REQUEST_LABEL_INDEX];
 				String content = fields[REQUEST_ELAPSE_TIME_INDEX] + SEPARATOR
-						+ fields[REQUEST_SUCCESSFUL_INDEX];
+						+ fields[REQUEST_SUCCESSFUL_INDEX] + SEPARATOR + fields[REQUEST_TIME_INDEX] + SEPARATOR + fields[REQUEST_BYTE_INDEX];
 				output.collect(new Text(label), new Text(content));
 			}
 		}
@@ -92,35 +98,48 @@ public class AnalysisSummary extends Configured implements Tool {
 				throws IOException {
 			int max = Integer.MIN_VALUE;
 			int min = Integer.MAX_VALUE;
+			long startTime = Long.MAX_VALUE;
+			long endTime = Long.MIN_VALUE;
 			long sumElapse = 0L;
 			long powerSumElapse = 0L;
 			long count = 0L;
 			long succSumElapse = 0L;
 			long powerSuccSumElapse = 0L;
 			long succCount = 0L;
+			double sumThrougthput = 0.0; // M
 			while (values.hasNext()) {
 				String[] fields = values.next().toString().split(SEPARATOR);
-				int time = Integer.parseInt(fields[0]);
-				int powerTime = time * time;
-				sumElapse += time;
-				powerSumElapse += powerTime;
+				int elapseTime = Integer.parseInt(fields[0]);
+				int poweElapseTime = elapseTime * elapseTime;
+				sumElapse += elapseTime;
+				powerSumElapse += poweElapseTime;
 				count++;
 				if ("true".equals(fields[1])) {
-					if (time > max) {
-						max = time;
+					if (elapseTime > max) {
+						max = elapseTime;
 					}
-					if (time < min) {
-						min = time;
+					if (elapseTime < min) {
+						min = elapseTime;
 					}
-					succSumElapse += time;
-					powerSuccSumElapse += powerTime;
+					succSumElapse += elapseTime;
+					powerSuccSumElapse += poweElapseTime;
 					succCount++;
 				}
+				long time = Long.parseLong(fields[2]);
+				if (time > endTime) {
+					endTime = time;
+				}
+				if (time < startTime ) {
+					startTime = time;
+				}
+				
+				sumThrougthput += Integer.parseInt(fields[3]) * 1.0 / 1048576;
 			}
 			String content = max + SEPARATOR + min + SEPARATOR + sumElapse
 					+ SEPARATOR + powerSumElapse + SEPARATOR + count
 					+ SEPARATOR + succSumElapse + SEPARATOR
-					+ powerSuccSumElapse + SEPARATOR + succCount;
+					+ powerSuccSumElapse + SEPARATOR + succCount
+					+ SEPARATOR + startTime + SEPARATOR + endTime + SEPARATOR + sumThrougthput;
 			output.collect(key, new Text(content));
 		}
 	}
@@ -136,12 +155,15 @@ public class AnalysisSummary extends Configured implements Tool {
 				throws IOException {
 			int max = Integer.MIN_VALUE;
 			int min = Integer.MAX_VALUE;
+			long startTime = Long.MAX_VALUE;
+			long endTime = Long.MIN_VALUE;
 			long sumElapse = 0L;
 			long powerSumElapse = 0L;
 			long count = 0L;
 			long succSumElapse = 0L;
 			long powerSuccSumElapse = 0L;
 			long succCount = 0L;
+			double sumThrougthput = 0.0; // M
 			while (values.hasNext()) {
 				String[] fields = values.next().toString().split(SEPARATOR);
 				int maxTmp = Integer.parseInt(fields[0]);
@@ -158,6 +180,17 @@ public class AnalysisSummary extends Configured implements Tool {
 				succSumElapse += Long.parseLong(fields[5]);
 				powerSuccSumElapse += Long.parseLong(fields[6]);
 				succCount += Long.parseLong(fields[7]);
+				
+				long startTimeTmp = Long.parseLong(fields[8]);
+				long endTimeTmp = Long.parseLong(fields[9]);
+				if (endTimeTmp > endTime) {
+					endTime = endTimeTmp;
+				}
+				if (startTimeTmp < startTime ) {
+					startTime = startTimeTmp;
+				}
+				
+				sumThrougthput += Double.parseDouble(fields[10]);
 			}
 
 			double dev = powerSumElapse * 1.0 / count
@@ -166,12 +199,13 @@ public class AnalysisSummary extends Configured implements Tool {
 					- (succSumElapse * 1.0 / succCount)
 					* (succSumElapse * 1.0 / succCount);
 			
-			DecimalFormat df = new DecimalFormat("###.000");
+			DecimalFormat df = new DecimalFormat("##0.000");
 			String content = max + SEPARATOR + min + SEPARATOR + df.format(sumElapse * 1.0
 					/ count) + SEPARATOR + df.format(succSumElapse * 1.0 / succCount) + SEPARATOR
 					+ df.format(Math.sqrt(dev)) + SEPARATOR + df.format(Math.sqrt(succDev))
 					+ SEPARATOR + count + SEPARATOR + succCount + SEPARATOR
-					+ (count - succCount);
+					+ (count - succCount) + SEPARATOR + df.format((count - succCount) * 1.0 / count)
+					+ SEPARATOR + startTime + SEPARATOR + endTime + SEPARATOR + df.format(sumThrougthput);
 			output.collect(key, new Text(content));
 		}
 	}
@@ -210,6 +244,22 @@ public class AnalysisSummary extends Configured implements Tool {
 					conf.setNumMapTasks(Integer.parseInt(args[++i]));
 				} else if ("-r".equals(args[i])) {
 					conf.setNumReduceTasks(Integer.parseInt(args[++i]));
+				} else if ("-l".equals(args[i])) {
+					String [] fields = args[++i].split(SEPARATOR);
+					conf.setInt("NAME_LIST_LENGTH", fields.length);
+					for(int j = 0; j < fields.length; j++) {
+						if ("timeStamp".equals(fields[j])) {
+							conf.setInt("REQUEST_TIME_INDEX", j);
+						} else if("elapsed".equals(fields[j])) {
+							conf.setInt("REQUEST_ELAPSE_TIME_INDEX", j);
+						} else if("label".equals(fields[j])) {
+							conf.setInt("REQUEST_LABEL_INDEX", j);
+						} else if("success".equals(fields[j])) {
+							conf.setInt("REQUEST_SUCCESSFUL_INDEX", j);
+						} else if ("bytes".equals(fields[j])) {
+							conf.setInt("REQUEST_BYTE_INDEX", j);
+						}
+					}
 				} else {
 					other_args.add(args[i]);
 				}
@@ -224,23 +274,10 @@ public class AnalysisSummary extends Configured implements Tool {
 			}
 		}
 		// Make sure there are exactly 2 parameters left.
-		if (other_args.size() != 3) {
+		if (other_args.size() != 2) {
 			System.out.println("ERROR: Wrong number of parameters: "
 					+ other_args.size() + " instead of 2.");
 			return printUsage();
-		}
-		
-		String [] fields = other_args.get(2).split(SEPARATOR);
-		for(int i = 0; i < fields.length; i++) {
-			if ("timeStamp".equals(fields[i])) {
-				REQUEST_TIME_INDEX = i;
-			} else if("elapsed".equals(fields[i])) {
-				REQUEST_ELAPSE_TIME_INDEX = i;
-			} else if("label".equals(fields[i])) {
-				REQUEST_LABEL_INDEX = i;
-			} else if("success".equals(fields[i])) {
-				REQUEST_SUCCESSFUL_INDEX = i;
-			}
 		}
 		
 		FileInputFormat.setInputPaths(conf, other_args.get(0));
