@@ -212,7 +212,7 @@ public class AnalysisSummary extends Configured implements Tool {
 
 	static int printUsage() {
 		System.out
-				.println("wordcount [-m <maps>] [-r <reduces>] <input> <output>");
+				.println("analysis_summery [-m <maps>] [-r <reduces>] <input> <output> -l <namelist>");
 		ToolRunner.printGenericCommandUsage(System.out);
 		return -1;
 	}
@@ -237,6 +237,7 @@ public class AnalysisSummary extends Configured implements Tool {
 		conf.setCombinerClass(Combine.class);
 		conf.setReducerClass(Reduce.class);
 
+		boolean param = false;
 		List<String> other_args = new ArrayList<String>();
 		for (int i = 0; i < args.length; ++i) {
 			try {
@@ -245,6 +246,7 @@ public class AnalysisSummary extends Configured implements Tool {
 				} else if ("-r".equals(args[i])) {
 					conf.setNumReduceTasks(Integer.parseInt(args[++i]));
 				} else if ("-l".equals(args[i])) {
+					param = true;
 					String [] fields = args[++i].split(SEPARATOR);
 					conf.setInt("NAME_LIST_LENGTH", fields.length);
 					for(int j = 0; j < fields.length; j++) {
@@ -280,6 +282,10 @@ public class AnalysisSummary extends Configured implements Tool {
 			return printUsage();
 		}
 		
+		if (!param) {
+			System.out.println("请输入-l namelist.txt的内容。");
+			return printUsage();
+		}
 		FileInputFormat.setInputPaths(conf, other_args.get(0));
 		FileOutputFormat.setOutputPath(conf, new Path(other_args.get(1)));
 
